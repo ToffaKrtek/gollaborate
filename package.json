@@ -1,0 +1,29 @@
+{
+  "name": "gollaborate",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "esbuild frontend/main.js --bundle --minify --outfile=static/bundle.js --format=esm"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ToffaKrtek/gollaborate.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/ToffaKrtek/gollaborate/issues"
+  },
+  "homepage": "https://github.com/ToffaKrtek/gollaborate#readme",
+  "dependencies": {
+    "@codemirror/lang-javascript": "^6.2.5",
+    "@codemirror/state": "^6.6.0",
+    "@codemirror/view": "^6.43.0",
+    "esbuild": "^0.28.0",
+    "yjs": "^13.6.30"
+  }
+}
