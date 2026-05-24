@@ -103,20 +103,38 @@ func wsEchoHandler(w http.ResponseWriter, r *http.Request) {
 //go:embed static/*
 var staticFiles embed.FS
 var indexTemplate = template.Must(template.New("index").Parse(`<!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <title>Collaborative Code Editor</title>
-    <style>
-        body { margin: 0; height: 100vh; display: flex; flex-direction: column; }
-        #editor { flex: 1; overflow: auto; }
-    </style>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Редактор: {{.Doc}}</title>
+	<link rel="stylesheet" href="/static/editor.css">
 </head>
 <body>
-    <div id="editor"></div>
-    <script src="/static/bundle.js" type="module"></script>
+	<div id="status" class="status" data-doc="{{.Doc}}">Disconnected</div>
+	<textarea id="code-editor" spellcheck="false" placeholder="Начните редактирование..."></textarea>
+	<script>
+		// .Doc уже экранирован в Go, можно вставлять напрямую в строку JS
+		window.currentDoc = "{{.Doc}}";
+	</script>
+	<script src="/static/editor.js" defer></script>
 </body>
 </html>`))
+
+func setContentType(w http.ResponseWriter, path string) {
+	ext := filepath.Ext(path)
+	switch ext {
+	case ".js":
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	case ".css":
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	case ".html", ".htm":
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	default:
+		w.Header().Set("Content-Type", "application/octet-stream")
+	}
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+}
 
 func staticHandler(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path[len("/static/"):]
@@ -125,20 +143,27 @@ func staticHandler(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	ext := filepath.Ext(path)
-	switch ext {
-	case ".js":
-		w.Header().Set("Content-Type", "application/javascript")
-	case ".css":
-		w.Header().Set("Content-Type", "text/css")
-	default:
-		w.Header().Set("Content-Type", "text/plain")
-	}
+	setContentType(w, path)
 	w.Write(data)
 }
 
 func indexHandler(w http.ResponseWriter, r *http.Request) {
-	indexTemplate.Execute(w, nil)
+	doc := r.URL.Query().Get("doc")
+	if doc == "" {
+		doc = "untitled"
+	}
+
+	escapeDoc := template.JSEscapeString(doc)
+
+	data := struct {
+		Doc string
+	}{
+		Doc: escapeDoc,
+	}
+
+	if err := indexTemplate.Execute(w, data); err != nil {
+		http.Error(w, "Template error", http.StatusInternalServerError)
+	}
 }
 
 func main() {

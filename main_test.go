@@ -11,6 +11,41 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestIndexPage_ShowsDocumentName(t *testing.T) {
+	req := httptest.NewRequest("GET", "/?doc=main.go", nil)
+	rec := httptest.NewRecorder()
+	http.HandlerFunc(indexHandler).ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+
+	assert.Contains(t, body, "<title>Редактор: main.go</title>")
+	assert.Contains(t, body, `data-doc="main.go"`)
+	assert.Contains(t, body, `window.currentDoc = "main.go";`)
+}
+
+func TestIndexPage_OfflineStructure(t *testing.T) {
+	req := httptest.NewRequest("GET", "/", nil)
+	rec := httptest.NewRecorder()
+	http.HandlerFunc(indexHandler).ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+
+	assert.Contains(t, body, `id="code-editor"`)
+	assert.Contains(t, body, `spellcheck="false"`)
+	assert.Contains(t, body, `<textarea`)
+	assert.Contains(t, body, `id="status"`)
+
+	assert.Contains(t, body, `href="/static/editor.css"`)
+	assert.Contains(t, body, `src="/static/editor.js"`)
+
+	assert.NotContains(t, body, "https://")
+	assert.NotContains(t, body, "//cdnjs")
+	assert.NotContains(t, body, "unpkg")
+	assert.NotContains(t, body, "cdn.jsdelivr")
+}
+
 func TestWebSocketRooms(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		wsHandler(w, r)
