@@ -11,6 +11,37 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestWebSocket_BroadcastsChanges(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/ws" {
+			wsHandler(w, r)
+			return
+		}
+		indexHandler(w, r)
+	}))
+	defer server.Close()
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	conn1, _, err := websocket.DefaultDialer.Dial(wsURL+"?doc=shared.go", nil)
+	assert.NoError(t, err)
+	defer conn1.Close()
+
+	conn2, _, err := websocket.DefaultDialer.Dial(wsURL+"?doc=shared.go", nil)
+	assert.NoError(t, err)
+	defer conn2.Close()
+
+	change := "func main() { fmt.Println(\"hello\") }"
+	err = conn1.WriteMessage(websocket.TextMessage, []byte(change))
+	assert.NoError(t, err)
+
+	_, received, err := conn2.ReadMessage()
+	assert.NoError(t, err)
+	assert.Equal(t, change, string(received))
+
+	conn1.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+	_, _, err = conn1.ReadMessage()
+	assert.Error(t, err)
+}
+
 func TestIndexPage_ShowsDocumentName(t *testing.T) {
 	req := httptest.NewRequest("GET", "/?doc=main.go", nil)
 	rec := httptest.NewRecorder()

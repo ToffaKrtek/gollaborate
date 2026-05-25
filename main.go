@@ -2,7 +2,9 @@ package main
 
 import (
 	"embed"
+	"fmt"
 	"html/template"
+	"net"
 	"net/http"
 	"path/filepath"
 	"sync"
@@ -35,7 +37,6 @@ func (rm *RoomManager) Join(doc string, conn *websocket.Conn) {
 func (rm *RoomManager) Leave(doc string, conn *websocket.Conn) {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
-
 	if _, ok := rm.rooms[doc]; ok {
 		delete(rm.rooms[doc], conn)
 		if len(rm.rooms[doc]) == 0 {
@@ -44,6 +45,7 @@ func (rm *RoomManager) Leave(doc string, conn *websocket.Conn) {
 	}
 }
 
+// FIX: "Roo mManager" → "RoomManager"
 func (rm *RoomManager) Broadcast(doc string, msgType int, msg []byte, sender *websocket.Conn) {
 	rm.mu.RLock()
 	defer rm.mu.RUnlock()
@@ -51,7 +53,7 @@ func (rm *RoomManager) Broadcast(doc string, msgType int, msg []byte, sender *we
 		if conn == sender {
 			continue
 		}
-		conn.WriteMessage(msgType, msg)
+		_ = conn.WriteMessage(msgType, msg) // игнорируем ошибку для простоты
 	}
 }
 
@@ -67,12 +69,12 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		http.Error(w, "could no upgrade", http.StatusBadRequest)
+		http.Error(w, "could not upgrade", http.StatusBadRequest)
 		return
 	}
 	roomManager.Join(doc, conn)
-
 	defer roomManager.Leave(doc, conn)
+
 	for {
 		msgType, msg, err := conn.ReadMessage()
 		if err != nil {
@@ -85,7 +87,8 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 func wsEchoHandler(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		http.Error(w, "could no upgrade", http.StatusBadRequest)
+		http.Error(w, "could not upgrade", http.StatusBadRequest)
+		return
 	}
 	defer conn.Close()
 
@@ -102,6 +105,7 @@ func wsEchoHandler(w http.ResponseWriter, r *http.Request) {
 
 //go:embed static/*
 var staticFiles embed.FS
+
 var indexTemplate = template.Must(template.New("index").Parse(`<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -113,28 +117,10 @@ var indexTemplate = template.Must(template.New("index").Parse(`<!DOCTYPE html>
 <body>
 	<div id="status" class="status" data-doc="{{.Doc}}">Disconnected</div>
 	<textarea id="code-editor" spellcheck="false" placeholder="Начните редактирование..."></textarea>
-	<script>
-		// .Doc уже экранирован в Go, можно вставлять напрямую в строку JS
-		window.currentDoc = "{{.Doc}}";
-	</script>
+	<script>window.currentDoc = "{{.Doc}}";</script>
 	<script src="/static/editor.js" defer></script>
 </body>
 </html>`))
-
-func setContentType(w http.ResponseWriter, path string) {
-	ext := filepath.Ext(path)
-	switch ext {
-	case ".js":
-		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
-	case ".css":
-		w.Header().Set("Content-Type", "text/css; charset=utf-8")
-	case ".html", ".htm":
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	default:
-		w.Header().Set("Content-Type", "application/octet-stream")
-	}
-	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-}
 
 func staticHandler(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path[len("/static/"):]
@@ -143,7 +129,16 @@ func staticHandler(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	setContentType(w, path)
+	ext := filepath.Ext(path)
+	switch ext {
+	case ".js":
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	case ".css":
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	default:
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	}
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	w.Write(data)
 }
 
@@ -152,25 +147,36 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 	if doc == "" {
 		doc = "untitled"
 	}
-
-	escapeDoc := template.JSEscapeString(doc)
-
-	data := struct {
-		Doc string
-	}{
-		Doc: escapeDoc,
-	}
+	escapedDoc := template.JSEscapeString(doc)
+	data := struct{ Doc string }{Doc: escapedDoc}
 
 	if err := indexTemplate.Execute(w, data); err != nil {
 		http.Error(w, "Template error", http.StatusInternalServerError)
+		return
 	}
 }
 
 func main() {
-	// http.HandleFunc("/ws", wsEchoHandler)
+	printLocalAccessInfo()
+
 	http.HandleFunc("/ws", wsHandler)
 	http.HandleFunc("/static/", staticHandler)
 	http.HandleFunc("/", indexHandler)
 
+	fmt.Println("🚀 Сервер запущен на http://0.0.0.0:8080")
 	http.ListenAndServe("0.0.0.0:8080", nil)
+}
+
+func printLocalAccessInfo() {
+	addrs, _ := net.InterfaceAddrs()
+	for _, addr := range addrs {
+		if ipNet, ok := addr.(*net.IPNet); ok && !ipNet.IP.IsLoopback() {
+			if ip4 := ipNet.IP.To4(); ip4 != nil {
+				fmt.Printf("🌐 Локальный IP: http://%s:8080/?doc=файл\n", ip4)
+				fmt.Println("💡 Для внешнего доступа: ngrok http 8080")
+				return
+			}
+		}
+	}
+	fmt.Println("🌐 Доступ: http://localhost:8080/?doc=файл")
 }
